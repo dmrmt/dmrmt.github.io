@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>NAS Risk Calculator – Logistic Model</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #eef2f3;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 640px;
+      margin: 60px auto;
+      background-color: #ffffff;
+      border-radius: 12px;
+      padding: 30px 40px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+      margin-bottom: 10px;
+    }
+    h2 {
+      text-align: center;
+      color: #005580;
+      margin-bottom: 22px;
+      font-weight: 600;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: 600;
+      color: #333;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 640px) {
+      .row { grid-template-columns: 1fr; }
+      .container { margin: 24px auto; padding: 22px 18px; }
+    }
+    button {
+      width: 100%;
+      margin-top: 22px;
+      background-color: #005580;
+      color: white;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover { background-color: #003f5e; }
+    .result {
+      margin-top: 22px;
+      padding: 15px;
+      border-radius: 8px;
+      background-color: #f0f9ff;
+      border: 1px solid #b3e5fc;
+      color: #003366;
+      font-size: 16px;
+      line-height: 1.6;
+      min-height: 24px;
+    }
+    .notice {
+      background-color: #fff8e1;
+      border-left: 5px solid #ffc107;
+      padding: 10px 15px;
+      margin-bottom: 16px;
+      border-radius: 5px;
+      color: #333;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .muted {
+      color: #5d6b76;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid #cfe8ff;
+      background: #f2f8ff;
+      color: #003366;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .error {
+      background: #fff1f2;
+      border: 1px solid #fecdd3;
+      color: #7f1d1d;
+    }
+    .modelbox {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px dashed #c7d7e5;
+      background: #fbfdff;
+      color: #234;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .small {
+      font-size: 12px;
+      color: #345;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>NASリスク計算ツール</h1>
+    <h2>by ロジスティック回帰モデル</h2>
+
+    <div class="notice">
+      <strong>概要：</strong> この計算ツールは、ロジスティック回帰モデルを用いて<strong>発症確率</strong>を算出します。
+	<br/>
+      Antipsychotics index（抗精神病薬）とHypnotics index（ベンゾジアゼピン/睡眠薬）は無くても算出可能ですが、あったほうが精度は向上します。
+    </div>
+
+    <label for="apgarFlag">アプガースコア5分値は8以下？</label>
+    <select id="apgarFlag">
+      <option value="1">はい（8点以下）</option>
+      <option value="0" selected>いいえ（9点以上）</option>
+    </select>
+
+    <label for="hcz">出生時頭囲のZスコアは？</label>
+    <input type="number" id="hcz" step="0.1" placeholder="例: -0.45" required />
+
+    <div class="row">
+      <div>
+        <label for="anti">Antipsychotics index（任意）</label>
+        <input type="number" id="anti" step="0.01" placeholder="例: 1.0" />
+      </div>
+      <div>
+        <label for="hyp">Hypnotics index（任意）</label>
+        <input type="number" id="hyp" step="0.01" placeholder="例: 2.0" />
+      </div>
+    </div>
+    <div class="muted">インデックスの計算は <strong>Inada, et al. Psychiatry Clin Neurosci . 2015 Aug;69(8):440-7</strong> を参照してください.</div>
+
+    <button onclick="calculate()">計算</button>
+
+    <div class="result" id="result"></div>
+
+    <div class="modelbox" id="modelUsed"></div>
+  </div>
+
+  <script>
+    function isFiniteNumber(x) {
+      return typeof x === "number" && Number.isFinite(x);
+    }
+
+    function toNumberOrNull(value) {
+      if (value === null || value === undefined) return null;
+      const s = String(value).trim();
+      if (s === "") return null;
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function logistic(logit) {
+      // Probability = 1 / (1 + e^(−logit))
+      return 1 / (1 + Math.exp(-logit));
+    }
+
+    function calculate() {
+      const resultEl = document.getElementById("result");
+      const modelEl  = document.getElementById("modelUsed");
+
+      // Read inputs
+      const apgarFlag = parseInt(document.getElementById("apgarFlag").value, 10);
+      const hcz = toNumberOrNull(document.getElementById("hcz").value);
+      const anti = toNumberOrNull(document.getElementById("anti").value);
+      const hyp  = toNumberOrNull(document.getElementById("hyp").value);
+
+      // Basic validation
+      if (!isFiniteNumber(hcz)) {
+        resultEl.classList.add("error");
+        resultEl.innerHTML = "<strong>エラー：</strong> 適切な頭囲Zスコアを入力してください。";
+        modelEl.innerHTML = "";
+        return;
+      }
+
+      const bothOptionalKnown = (anti !== null && hyp !== null);
+      const onlyOneOptionalKnown = ((anti !== null) !== (hyp !== null)); // XOR
+
+      // Compute logit
+      let logit;
+      let modelText = "";
+
+      if (bothOptionalKnown) {
+        // logit = −1.96+(1.97 * Apgar<9) − (0.61 * HCz) + (0.2 * anti) + (0.25 * hyp)
+        logit = -1.96 + (1.97 * apgarFlag) - (0.61 * hcz) + (0.2 * anti) + (0.25 * hyp);
+        modelText =
+          "<strong>使用モデル：</strong> 拡張（アプガー5分値, 頭囲Zスコア, antipsychotics index, hypnotics index）<br/>" +
+          "<span class='small'>logit = −1.96 + 1.97×(Apgar≤8) − 0.61×(HC z) + 0.20×(Anti index) + 0.25×(Hyp index)</span>";
+      } else {
+        // logit = −1.17 + (1.82 * Apgar<9) − (0.59 * HCz)
+        logit = -1.17 + (1.82 * apgarFlag) - (0.59 * hcz);
+        modelText =
+          "<strong>使用モデル：</strong> 標準（アプガー5分値, 頭囲Zスコア）<br/>" +
+          "<span class='small'>logit = −1.17 + 1.82×(Apgar≤8) − 0.59×(HC z)</span>";
+      }
+
+      // Probability
+      let p = logistic(logit);
+
+      // Clamp just in case of numeric edge cases
+      p = Math.min(1, Math.max(0, p));
+
+      const pct = (p * 100).toFixed(1);
+
+      // Simple interpretation (edit as you like)
+      let interpretation = "";
+      if (p < 0.20) {
+        interpretation = "<strong>発症確率【低い】</strong>： このモデルでは、NASは発症しにくいと予想されます。";
+      } else if (p < 0.50) {
+        interpretation = "<strong>発症確率【中等度】</strong>： 慎重な観察を検討してください。";
+      } else if (p < 0.75) {
+        interpretation = "<strong>発症確率【高い】</strong>： 適切な観察とモニタリングを行ってください。";
+      } else {
+        interpretation = "<strong>発症確率【非常に高い】</strong>： 高率で発症が予想されます。発症の際の対応を準備してください。";
+      }
+
+      // Show warning if only one optional index is filled
+      let note = "";
+      if (onlyOneOptionalKnown) {
+        note =
+          "<br/><em>注意：</em> １つのインデックスのみの入力の場合、<strong>標準</strong>モデルでの予測になります。" +
+          "<br/>拡張モデルを使用する場合は、両方のインデックスを入力してください。";
+      }
+
+      // Render
+      resultEl.classList.remove("error");
+      resultEl.innerHTML =
+        `<strong>推定NAS発症確率：</strong> ${pct}%<br/>` +
+        `${interpretation}` +
+        `<br/>` +
+        note;
+
+      modelEl.innerHTML = modelText;
+    }
+  </script>
+</body>
+</html>
