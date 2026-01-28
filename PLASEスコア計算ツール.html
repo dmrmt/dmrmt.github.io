@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PLASEスコア計算ツール</title>
+  <style>
+    :root{
+      /* NICU向け：白＋くすみピンク（ベース） */
+      --bg: #fbf4f6;
+      --card: #ffffff;
+      --text: #3b3f46;
+      --border: #ead7dd;
+      --shadow: 0 10px 26px rgba(120, 55, 75, 0.14);
+
+      --accent: #c9738f;
+
+      /* 結果（夜勤でも眩しくない落ち着いた色） */
+      --low-bg:  #eef6f1;
+      --low-bd:  #b7dcc3;
+      --low-tx:  #14532d;
+
+      --mid-bg:  #fff6e6;
+      --mid-bd:  #f2cf84;
+      --mid-tx:  #7c3f08;
+
+      --high-bg: #fff1f2;
+      --high-bd: #f0aebb;
+      --high-tx: #881337;
+
+      /* 数字を医療機器風に：等幅＆読みやすい */
+      --num-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    body{
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #fff, var(--bg));
+      margin: 0;
+      padding: 0;
+      color: var(--text);
+    }
+
+    .container{
+      max-width: 680px;
+      margin: 56px auto;
+      background: var(--card);
+      border-radius: 16px;
+      padding: 30px 42px 36px;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(234,215,221,0.7);
+    }
+
+    h1{
+      text-align: center;
+      color: #8b3b55;
+      margin: 4px 0 18px;
+      letter-spacing: 0.5px;
+    }
+
+    .notice{
+      background: #fff7fa;
+      border: 1px solid var(--border);
+      border-left: 6px solid var(--accent);
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      border-radius: 10px;
+      color: #5b2b3c;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+    .ref{
+      margin-top: 8px;
+      font-size: 12px;
+      color: #6b3b4c;
+      line-height: 1.5;
+    }
+
+    label{
+      display: block;
+      margin-top: 14px;
+      font-weight: 650;
+      color: #5a2336;
+    }
+
+    input{
+      width: 100%;
+      padding: 11px 12px;
+      margin-top: 6px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      box-sizing: border-box;
+      font-size: 16px;
+      background: #fff;
+    }
+    input:focus{
+      outline: none;
+      border-color: rgba(201,115,143,0.85);
+      box-shadow: 0 0 0 3px rgba(201,115,143,0.18);
+    }
+
+    .ga-grid{
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto;
+      gap: 10px;
+      align-items: end;
+      margin-top: 6px;
+    }
+    @media (max-width: 640px){
+      .container{ margin: 22px auto; padding: 22px 18px 28px; }
+      .ga-grid{ grid-template-columns: 1fr auto; }
+    }
+    .unit{
+      color: #8a5566;
+      font-size: 14px;
+      padding-bottom: 10px;
+    }
+
+    button{
+      width: 100%;
+      margin-top: 22px;
+      background: linear-gradient(180deg, #d98aa3, var(--accent));
+      color: #fff;
+      padding: 12px 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 10px 18px rgba(201,115,143,0.22);
+    }
+    button:hover{ filter: brightness(0.98); }
+
+    /* 結果カード：高さ固定でレイアウト安定（連続入力時もガタつかない） */
+    .result{
+      margin-top: 22px;
+      padding: 18px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: #fff;
+      min-height: 92px; /* 固定に近い見た目 */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      transition: background-color .18s ease, border-color .18s ease;
+    }
+
+    .prob-wrap{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      width: 100%;
+    }
+    .prob-label{
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: 0.4px;
+      opacity: 0.92;
+    }
+
+    /* 医療機器っぽい「数値強調」：等幅＆タブラー数字 */
+    .prob-value{
+      font-family: var(--num-font);
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1, "lnum" 1;
+      font-size: 40px;
+      font-weight: 900;
+      letter-spacing: 0.6px;
+      line-height: 1.05;
+    }
+    .prob-suffix{
+      font-family: var(--num-font);
+      font-variant-numeric: tabular-nums;
+      font-size: 20px;
+      font-weight: 800;
+      margin-left: 2px;
+      vertical-align: baseline;
+      opacity: 0.95;
+    }
+
+    /* 色分け（落ち着いたトーン） */
+    .risk-low{
+      background: var(--low-bg);
+      border-color: var(--low-bd);
+    }
+    .risk-low .prob-value,
+    .risk-low .prob-suffix{ color: var(--low-tx); }
+
+    .risk-mid{
+      background: var(--mid-bg);
+      border-color: var(--mid-bd);
+    }
+    .risk-mid .prob-value,
+    .risk-mid .prob-suffix{ color: var(--mid-tx); }
+
+    .risk-high{
+      background: var(--high-bg);
+      border-color: var(--high-bd);
+    }
+    .risk-high .prob-value,
+    .risk-high .prob-suffix{ color: var(--high-tx); }
+
+    .error{
+      background: #fff1f2;
+      border: 1px solid #fecdd3;
+      color: #7f1d1d;
+      justify-content: flex-start;
+      text-align: left;
+    }
+
+    .error .prob-wrap{ align-items: flex-start; }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>PLASEスコア計算ツール</h1>
+
+    <div class="notice">
+      <strong>概要：</strong>
+       在胎期間 と 日齢3の超音波指標 から、ロジスティック回帰式に基づく
+      <strong>PDA手術予測確率</strong> を算出します。
+      <div class="ref">
+        Masutani, et al. Generation of PLASE score for patent ductus arteriosus using the PLASE study database.
+        Pediatr Res. 2025;98:152-160.
+      </div>
+    </div>
+
+    <label for="pdad">PDA径（mm）</label>
+    <input type="number" id="pdad" step="0.1" placeholder="例：2.3" required />
+
+    <label for="lpaedv">LPA拡張末期流速（cm/s）</label>
+    <input type="number" id="lpaedv" step="0.1" placeholder="例：18.0" required />
+
+    <label for="laao">LA/Ao比</label>
+    <input type="number" id="laao" step="0.01" placeholder="例：1.45" required />
+
+    <label>在胎期間</label>
+    <div class="ga-grid">
+      <div>
+        <input type="number" id="gaWeeks" step="1" min="0" placeholder="例：26" required />
+      </div>
+      <div class="unit">週</div>
+      <div>
+        <input type="number" id="gaDays" step="1" min="0" max="6" placeholder="例：3" required />
+      </div>
+      <div class="unit">日</div>
+    </div>
+
+    <button onclick="calculate()">計算</button>
+
+    <div class="result" id="result"></div>
+  </div>
+
+  <script>
+    function toNumberOrNull(v){
+      const s = String(v ?? "").trim();
+      if (s === "") return null;
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function logistic(x){
+      return 1 / (1 + Math.exp(-x));
+    }
+
+    function setClass(el, cls){
+      el.classList.remove("risk-low","risk-mid","risk-high","error");
+      if (cls) el.classList.add(cls);
+    }
+
+    function calculate(){
+      const resultEl = document.getElementById("result");
+
+      const pdad = toNumberOrNull(document.getElementById("pdad").value);
+      const lpaedv = toNumberOrNull(document.getElementById("lpaedv").value);
+      const laao = toNumberOrNull(document.getElementById("laao").value);
+      const gaW = toNumberOrNull(document.getElementById("gaWeeks").value);
+      const gaD = toNumberOrNull(document.getElementById("gaDays").value);
+
+      const errors = [];
+      if (pdad === null) errors.push("PDA径を入力してください。");
+      if (lpaedv === null) errors.push("LPA拡張末期流速を入力してください。");
+      if (laao === null) errors.push("LA/Ao比を入力してください。");
+      if (gaW === null || gaD === null) errors.push("在胎期間を正しく入力してください。");
+      if (gaD !== null && (gaD < 0 || gaD > 6)) errors.push("日は0〜6の範囲で入力してください。");
+
+      if (errors.length){
+        setClass(resultEl, "error");
+        resultEl.innerHTML =
+          "<div class='prob-wrap'><div><strong>エラー：</strong><br>" +
+          errors.map(e => "・" + e).join("<br>") +
+          "</div></div>";
+        return;
+      }
+
+      const gaWeeks = gaW + gaD / 7;
+
+      const logit =
+        10.7091 +
+        1.141 * pdad +
+        0.036 * lpaedv +
+        0.6356 * laao -
+        0.5652 * gaWeeks;
+
+      const p = logistic(logit);
+      const pct = (p * 100).toFixed(1);
+
+      let cls;
+      if (p >= 0.50) cls = "risk-high";
+      else if (p >= 0.25) cls = "risk-mid";
+      else cls = "risk-low";
+
+      setClass(resultEl, cls);
+      resultEl.innerHTML = `
+        <div class="prob-wrap">
+          <div class="prob-label">予測確率</div>
+          <div>
+            <span class="prob-value">${pct}</span><span class="prob-suffix">%</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // 初期表示もレイアウトを安定させる（空でも高さ確保）
+    (function init(){
+      const resultEl = document.getElementById("result");
+      resultEl.innerHTML = `
+        <div class="prob-wrap" aria-hidden="true" style="opacity:0.0;">
+          <div class="prob-label">予測確率</div>
+          <div><span class="prob-value">0.0</span><span class="prob-suffix">%</span></div>
+        </div>
+      `;
+    })();
+  </script>
+</body>
+</html>
